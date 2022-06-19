@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 const {
     XMLParser,
@@ -9,7 +10,8 @@ const {
 
 const paths = {
     input: __dirname + '/input/',
-    output: __dirname + '/output/'
+    output: __dirname + '/output/',
+    baseImagePath: 'https://dev2.ikks.com/dw/image/v2/BFQN_DEV/on/demandware.static/-/Sites-ikks_master_v0/default/dwfde42d22/produits/'
 };
 
 const compileSF = _ => {
@@ -49,6 +51,8 @@ const compileSF = _ => {
 
         var uniques = Array.from(new Set(masters)).join(',');
 
+        var uniqueVariations = Array.from(new Set(VGIDs.flat()));
+
         categories['category-assignment'] = newCategoryAssignments.flat();
         categories.recommendation.length = 0;
 
@@ -70,9 +74,28 @@ const compileSF = _ => {
             .then(data => {
                 return data.toString().split(',');
             }).then(ids => {
-                compileMaster(ids);
-                compilePB(ids);
-                compileInventory(ids);
+                //compileMaster(ids);
+                //compilePB(ids);
+                //compileInventory(ids);
+                //loadImages(uniqueVariations);
+            })
+        })
+    })
+}
+
+const loadImages = file => {
+    fs.readFile(file, (err, data) => {
+        var imgsArr = JSON.parse(data);
+        imgsArr.length = 10
+        imgsArr.forEach(img => {
+            if (!img) return;
+            var splittedURL = img.split('/');
+            let parentFolder = splittedURL[1];
+            if (!parentFolder) return;
+            fs.mkdir(path.resolve(paths.output, 'images/produits' , parentFolder), {recursive: true}, _ => {
+                https.get('https://dev2.ikks.com/dw/image/v2/BFQN_DEV/on/demandware.static/-/Sites-ikks_master_v0/default/dwfde42d22/' + img, res => {
+                    res.pipe(fs.createWriteStream(path.resolve(paths.output, 'images', img)))
+                })
             })
         })
     })
@@ -89,11 +112,26 @@ const compileMaster = ids => {
             product
         } = res.catalog;
 
-        var catAssignment = res.catalog['category-assignment']
+        var catAssignment = res.catalog['category-assignment'];
+
+        var images = [];
 
         var newProduct = product.filter((element) => {
+            if (ids.indexOf(element['@_product-id'].split('-')[0]) > -1 && element['@_product-id'].split('-').length === 1) {
+                if (element['images']) {
+                    images.push(element['images']['image-group'])
+                }
+            }
             return ids.indexOf(element['@_product-id'].split('-')[0]) > -1
         });
+
+        var flattenImages = images.flat();
+
+        var processed = flattenImages.map(item => {
+            return item.image.map ? item.image.map(img => img['@_path']) : item.image['@_path']
+        });
+
+        images = processed.flat();
 
         var newCA = catAssignment.filter((element) => {
             return ids.indexOf(element['@_product-id'].split('-')[0]) > -1
@@ -107,6 +145,10 @@ const compileMaster = ids => {
         });
 
         var outputFile = builder.build(res);
+
+        fs.writeFile('imageURLs.txt', JSON.stringify(images), _ => {
+            console.log('images file compiled');
+        })
 
         fs.writeFile(path.resolve(paths.output, 'newMaster.xml'), outputFile, _ => {
             console.log("Master catalog compiled");
@@ -180,4 +222,6 @@ const compileInventory = ids => {
     });
 }
 
-compileSF();
+// compileSF();
+
+loadImages('imageURLs.txt');
